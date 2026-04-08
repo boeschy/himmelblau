@@ -132,7 +132,7 @@ CMD_TAB = "     "
 CMD_SEP = f" && \\ \n{CMD_TAB}"
 
 
-GEN_MANPAGE = "python3 scripts/gen_param_code.py --gen-man --man-output man/man5/himmelblau.conf.5"
+GEN_MANPAGE = "python3 src/common/scripts/gen_param_code.py --gen-man --man-output man/man5/himmelblau.conf.5"
 
 
 def build_deb_final_cmd(features: list, distro_slug: str, cross_target: str = "") -> str:
@@ -152,7 +152,7 @@ def build_deb_final_cmd(features: list, distro_slug: str, cross_target: str = ""
         feat_str = f" --features {','.join(pkg_features)}" if pkg_features else ""
         if "pam" in pkg or "nss" in pkg:
             feat_str += " --multiarch=same"
-        parts.append(f"cargo deb ${{CARGO_PATCH_ARG}}{target_arg}{feat_str} --deb-revision={distro_slug} -p {pkg}")
+        parts.append(f"cargo deb ${{CARGO_PATCH_ARG}}{target_arg}{feat_str} --deb-revision={distro_slug}${{DEB_REVISION_APPEND}} -p {pkg}")
     gen_servicefiles = "make deb-servicefiles"
     return f'CMD ["/bin/sh", "-c", \\\n{CMD_TAB}"{GEN_MANPAGE} && {gen_servicefiles} && {CMD_SEP.join(parts)} "]'
 
