@@ -9,7 +9,7 @@ set -Eeuo pipefail
 
 ########## configurable bits (edit in-place) ##########
 GITHUB_REPO="IsmaelMartinez/teams-for-linux"
-PINNED_VERSION="2.6.19"
+PINNED_VERSION="2.7.13"
 SYSTEM_INSTALL_DIR="/opt/teams-for-linux"
 : "${TEAMSL_APP_DIR:=}"
 : "${GITHUB_TOKEN:=}"
