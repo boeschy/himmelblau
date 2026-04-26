@@ -648,7 +648,7 @@ in
 
     connection_timeout = mkOption {
       type = types.nullOr (types.ints.unsigned);
-      default = 30;
+      default = 5;
       description = ''
         The timeout in seconds for connections to the authentication server.
       '';
