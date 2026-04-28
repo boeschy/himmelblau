@@ -332,6 +332,32 @@ in
       example = "/etc/himmelblau/logon.sh";
     };
 
+    auto_sudo_owner = mkOption {
+      type = types.nullOr (types.bool);
+      default = false;
+      description = ''
+        When set to
+        **true**
+        , the first Entra ID user to log in to each domain on this device is automatically
+        granted sudo access via the local sudo group (see
+        **local_sudo_group**
+        ). This user is considered the device owner. Subsequent users are not granted sudo
+        by this mechanism, though they may still receive it via
+        **sudo_groups**
+        or
+        **local_groups**
+        configuration.
+        
+        Ownership state is stored persistently under
+        */var/lib/himmelblaud/*
+        and is not affected by cache clearing. To reset device ownership, delete the
+        ownership state file or use
+        **aad-tool owner-reset**
+        .
+      '';
+      example = true;
+    };
+
     logon_token_scopes = mkOption {
       type = types.nullOr (types.listOf types.str);
       default = null;
