@@ -288,6 +288,20 @@ pub enum AuthCacheAction {
     PasswordHashUpdate { cred: String },
 }
 
+/// What a provider can establish, without any user credentials, about whether
+/// a name is a real UPN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpnVerdict {
+    /// The provider confirmed that this UPN exists.
+    Exists,
+    /// The provider definitively rejected this name as a UPN.
+    Absent,
+    /// Neither could be established, for example because the provider cannot
+    /// check, or the check failed for a reason which says nothing about the
+    /// name.
+    Unknown,
+}
+
 #[async_trait]
 pub trait IdProvider {
     async fn configure_hsm_keys<D: KeyStoreTxn + Send>(
@@ -300,6 +314,18 @@ pub trait IdProvider {
     }
 
     async fn check_online(&self, _tpm: &mut tpm::provider::BoxedDynTpm, _now: SystemTime) -> bool;
+
+    /// Authoritatively check whether `account_id` is a real UPN. Unlike
+    /// `unix_user_get`, which may answer with a placeholder for any name it
+    /// cannot reject, a verdict other than `Unknown` is evidence.
+    async fn unix_user_verify_upn(
+        &self,
+        _account_id: &str,
+        _tpm: &mut tpm::provider::BoxedDynTpm,
+        _machine_key: &tpm::structures::StorageKey,
+    ) -> UpnVerdict {
+        UpnVerdict::Unknown
+    }
 
     async fn unix_user_get<D: KeyStoreTxn + Send>(
         &self,
