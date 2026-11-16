@@ -685,7 +685,9 @@ in
         
         When enabled, Himmelblau asks Entra ID whether the signing-in account is federated. For an account federated to an identity provider other than AD FS, Himmelblau follows the Entra ID redirect to the Okta-hosted sign-in page, verifies the password with Okta and then asks for an Okta Verify push approval or one-time code if Okta requires a second factor. Okta's response is returned to Entra ID, and the sign-in continues like any other Entra ID sign-in, including device registration, Intune enrollment and Hello PIN setup.
         
-        Okta FastPass is not supported. Configure the Okta authentication policy to offer Okta Verify push or one-time codes, and configure the federated domain so that Entra ID accepts the multi-factor authentication performed by Okta (federatedIdpMfaBehavior). This option requires enable_experimental_mfa. The mfa_method option selects between push (PhoneAppNotification) and one-time codes (PhoneAppOTP).
+        Himmelblau always requests multi-factor authentication from Okta (wauth=http://schemas.microsoft.com/claims/multipleauthn), so that Entra ID records the MFA performed by Okta in the issued tokens and the Primary Refresh Token. Without it, Intune enrollment and other resources protected by Conditional Access fail later with a redirect to Okta that cannot be completed without a browser.
+        
+        Okta FastPass is not supported. Configure the Okta authentication policy to offer Okta Verify push or one-time codes, enable Okta MFA from Azure AD in the Microsoft Office 365 application in Okta, and configure the federated domain so that Entra ID accepts the multi-factor authentication performed by Okta (federatedIdpMfaBehavior). This option requires enable_experimental_mfa. The mfa_method option selects between push (PhoneAppNotification) and one-time codes (PhoneAppOTP).
       '';
       example = true;
     };

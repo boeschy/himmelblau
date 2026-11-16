@@ -50,6 +50,9 @@ const DRS_SCOPE: &str = "01cb2876-7ebd-4aa4-9cc9-d28bd4d359a9/.default";
 /// Redirect URI of the Microsoft Authentication Broker client used by
 /// libhimmelblau for device registration.
 const BROKER_DRS_REDIRECT_URI: &str = "ms-aadj-redir://auth/drs";
+/// WS-Federation authentication method that demands multi-factor
+/// authentication from the identity provider.
+const WS_FED_MFA_AUTHN: &str = "http://schemas.microsoft.com/claims/multipleauthn";
 
 /// The second factor of an Okta-federated sign-in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,6 +180,38 @@ fn decode_js_string(input: &str, quote: char) -> Option<String> {
         }
     }
     None
+}
+
+/// Ask the identity provider for multi-factor authentication in a
+/// WS-Federation sign-in request. Okta then reports the MFA it performed to
+/// Entra ID, so the tokens and the PRT satisfy MFA requirements later on.
+/// Other URLs are left unchanged.
+fn request_ws_fed_mfa(url: &mut Url) {
+    if !url
+        .query_pairs()
+        .any(|(key, value)| key == "wa" && value == "wsignin1.0")
+    {
+        return;
+    }
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(key, _)| key != "wauth")
+        .map(|(key, value)| (key.into_owned(), value.into_owned()))
+        .collect();
+    url.query_pairs_mut()
+        .clear()
+        .extend_pairs(pairs)
+        .append_pair("wauth", WS_FED_MFA_AUTHN);
+}
+
+/// The target of a `document.location.replace(...)` page, which Entra ID uses
+/// instead of an HTTP redirect to send a user to the federated identity
+/// provider.
+fn script_redirect(html: &str) -> Option<String> {
+    let start = html.find("document.location.replace(")? + "document.location.replace(".len();
+    let rest = html[start..].trim_start();
+    let quote = rest.chars().next().filter(|c| *c == '\'' || *c == '"')?;
+    decode_js_string(&rest[quote.len_utf8()..], quote).filter(|target| !target.is_empty())
 }
 
 /// The first error message of an IDX response, if any.
@@ -746,6 +781,9 @@ impl OktaFederationSession {
     async fn get_page(&self, url: Url) -> Result<(Url, String), String> {
         let mut url = url;
         for _ in 0..=MAX_REDIRECTS {
+            if same_origin(&self.idp_origin, &url) {
+                request_ws_fed_mfa(&mut url);
+            }
             if !self.allowed(&url) {
                 return Err(format!(
                     "Refusing to follow a redirect to {}",
@@ -768,7 +806,16 @@ impl OktaFederationSession {
             if !status.is_success() {
                 return Err(format!("Sign-in page returned HTTP status {status}"));
             }
-            return Ok((url, Self::read_body(response).await?));
+            let html = Self::read_body(response).await?;
+            if same_origin(&self.entra_origin, &url) {
+                if let Some(target) = script_redirect(&html) {
+                    url = url
+                        .join(&target)
+                        .map_err(|e| format!("Invalid redirect: {e}"))?;
+                    continue;
+                }
+            }
+            return Ok((url, html));
         }
         Err("Too many redirects".to_string())
     }
@@ -1473,6 +1520,48 @@ mod tests {
         assert!(
             parse_sign_in_form(r#"<form action="/x"><input name="a" value="b"></form>"#).is_none()
         );
+    }
+
+    #[test]
+    fn requests_mfa_in_ws_federation_sign_in() {
+        let mut url = Url::parse(
+            "https://sso.contoso.com/app/office365/x/sso/wsfed/passive\
+             ?username=user%40contoso.com&wa=wsignin1.0&wtrealm=urn%3afederation%3aMicrosoftOnline\
+             &wctx=estsredirect%3d2&wauth=urn%3aoasis%3anames%3atc%3aSAML%3a1.0%3aam%3apassword",
+        )
+        .unwrap();
+        request_ws_fed_mfa(&mut url);
+        let pairs: Vec<(String, String)> = url
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        let get = |name: &str| {
+            pairs
+                .iter()
+                .filter(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(get("wauth"), vec![WS_FED_MFA_AUTHN]);
+        assert_eq!(get("username"), vec!["user@contoso.com"]);
+        assert_eq!(get("wtrealm"), vec!["urn:federation:MicrosoftOnline"]);
+        assert_eq!(get("wctx"), vec!["estsredirect=2"]);
+
+        let mut other =
+            Url::parse("https://sso.contoso.com/login/token/redirect?stateToken=x").unwrap();
+        let before = other.clone();
+        request_ws_fed_mfa(&mut other);
+        assert_eq!(other, before);
+    }
+
+    #[test]
+    fn follows_script_redirects() {
+        let html = "<html><body><script nonce='n'>\r\n document.location.replace(\"https://sso.contoso.com/app/x/sso/wsfed/passive?wa=wsignin1.0\\u0026wctx=a%3db\")\r\n</script></body></html>";
+        assert_eq!(
+            script_redirect(html).unwrap(),
+            "https://sso.contoso.com/app/x/sso/wsfed/passive?wa=wsignin1.0&wctx=a%3db"
+        );
+        assert_eq!(script_redirect("<html>no redirect</html>"), None);
     }
 
     #[test]
