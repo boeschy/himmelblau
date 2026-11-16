@@ -528,9 +528,14 @@ fn parse_sign_in_form(html: &str) -> Option<PostForm> {
     let form_re = Regex::new(r"(?is)<form\b[^>]*>.*?</form>").ok()?;
     let form_tag_re = Regex::new(r"(?is)^<form\b[^>]*>").ok()?;
     let input_re = Regex::new(r"(?is)<input\b[^>]*>").ok()?;
-    form_re.find_iter(html).find_map(|form| {
+    for form in form_re.find_iter(html) {
         let form = form.as_str();
-        let action = html_attribute(form_tag_re.find(form)?.as_str(), "action")?;
+        let Some(tag) = form_tag_re.find(form) else {
+            continue;
+        };
+        let Some(action) = html_attribute(tag.as_str(), "action") else {
+            continue;
+        };
         let fields: Vec<(String, String)> = input_re
             .find_iter(form)
             .filter_map(|input| {
@@ -544,8 +549,11 @@ fn parse_sign_in_form(html: &str) -> Option<PostForm> {
         let form = PostForm { action, fields };
         let ws_fed = form.field("wresult").is_some_and(|v| !v.is_empty());
         let saml = form.field("SAMLResponse").is_some_and(|v| !v.is_empty());
-        (ws_fed || saml).then_some(form)
-    })
+        if ws_fed || saml {
+            return Some(form);
+        }
+    }
+    None
 }
 
 /// The `$Config` object of an Entra ID sign-in page.
