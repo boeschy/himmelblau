@@ -7515,7 +7515,7 @@ rec {
           {
             name = "reqwest";
             packageId = "reqwest 0.13.5";
-            features = [ "json" ];
+            features = [ "json" "cookies" "form" ];
           }
           {
             name = "rpassword";

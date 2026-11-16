@@ -6311,6 +6311,10 @@ where
                         // AuthCredHandler::MFA is invalid for offline auth
                         return Err(ResolverError);
                     }
+                    (AuthCredHandler::OktaFederation(..), _) => {
+                        // A pending Okta verification can only complete online.
+                        return Err(ResolverError);
+                    }
                     (AuthCredHandler::SetupPin { .. }, _) => {
                         // AuthCredHandler::SetupPin is invalid for offline auth
                         return Err(ResolverError);

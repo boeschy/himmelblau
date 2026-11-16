@@ -677,6 +677,19 @@ in
       example = false;
     };
 
+    enable_okta_federation = mkOption {
+      type = types.nullOr (types.bool);
+      default = false;
+      description = ''
+        A boolean option that enables sign-in for Entra ID accounts whose domain is federated to Okta Identity Engine, without a browser or the device authorization grant.
+        
+        When enabled, Himmelblau asks Entra ID whether the signing-in account is federated. For an account federated to an identity provider other than AD FS, Himmelblau follows the Entra ID redirect to the Okta-hosted sign-in page, verifies the password with Okta and then asks for an Okta Verify push approval or one-time code if Okta requires a second factor. Okta's response is returned to Entra ID, and the sign-in continues like any other Entra ID sign-in, including device registration, Intune enrollment and Hello PIN setup.
+        
+        Okta FastPass is not supported. Configure the Okta authentication policy to offer Okta Verify push or one-time codes, and configure the federated domain so that Entra ID accepts the multi-factor authentication performed by Okta (federatedIdpMfaBehavior). This option requires enable_experimental_mfa. The mfa_method option selects between push (PhoneAppNotification) and one-time codes (PhoneAppOTP).
+      '';
+      example = true;
+    };
+
     enable_passwordless_security_key = mkOption {
       type = types.nullOr (types.bool);
       default = false;

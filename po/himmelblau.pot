@@ -16,6 +16,9 @@ msgstr ""
 msgid "Approve sign-in in your authenticator app, then wait..."
 msgstr ""
 
+msgid "Approve the sign-in request in your Okta Verify app."
+msgstr ""
+
 msgid "Authenticated user {user} does not match requested user"
 msgstr ""
 
@@ -133,6 +136,9 @@ msgstr ""
 msgid "Enrolling the Hello PIN. Please wait..."
 msgstr ""
 
+msgid "Enter the code displayed in your Okta Verify app: "
+msgstr ""
+
 msgid "Enter the setup key '{secret}' to enroll a TOTP Authenticator app. Use '{issuer}' for the code name and '{account}' as the label/name."
 msgstr ""
 
@@ -236,7 +242,13 @@ msgstr ""
 msgid "Offline auth has expired. Please connect to the network to continue."
 msgstr ""
 
+msgid "Okta requested a different verification method. Please sign in again."
+msgstr ""
+
 msgid "Open your Authenticator app, and enter the number '{entropy}' to sign in."
+msgstr ""
+
+msgid "Open your Okta Verify app and tap {number} to approve the sign-in request."
 msgstr ""
 
 msgid "Open your authenticator app and scan this QR code to enroll. Then enter the generated code.\n"

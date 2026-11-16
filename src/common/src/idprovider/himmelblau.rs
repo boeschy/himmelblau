@@ -39,6 +39,9 @@ use crate::idprovider::common::TotpEnrollmentRecord;
 use crate::idprovider::common::PRT_REFRESH_AGE;
 use crate::idprovider::common::{BadPinCounter, RefreshCache};
 use crate::idprovider::interface::{tpm, UserTokenState};
+use crate::idprovider::okta_federation::{
+    federated_idp_url, FederationStep, OktaFederationSession,
+};
 use crate::reserved_ids::{is_systemd_dynamic_id, SYSTEMD_DYNAMIC_ID_MAX, SYSTEMD_DYNAMIC_ID_MIN};
 use crate::tpm::confidential_client_creds;
 use crate::unix_config::NameAttr;
@@ -1554,6 +1557,28 @@ impl IdProvider for HimmelblauProvider {
                         }
                     }
                 };
+
+                // Accounts federated to Okta sign in through the Okta-hosted
+                // page, which also replaces the ROPC password check below.
+                if !auth_init.passwordless() {
+                    if let Some(session) = self.okta_federation_session(account_id).await {
+                        if !self.attempt_online(SystemTime::now()).await {
+                            return Ok((
+                                AuthRequest::InitDenied {
+                                    msg: tr("Network outage detected."),
+                                },
+                                AuthCredHandler::None,
+                            ));
+                        }
+                        return Ok((
+                            AuthRequest::Password {
+                                prompt: None,
+                                long_prompt: None,
+                            },
+                            AuthCredHandler::OktaFederation(Box::new(session)),
+                        ));
+                    }
+                }
 
                 // Sign-in frequency optimization: For console logins with password_only mode,
                 // request password first and use PasswordFirst handler. This allows us to
@@ -3240,7 +3265,94 @@ impl IdProvider for HimmelblauProvider {
             }};
         }
 
+        // Completes an Okta-federated sign-in like the native MFA flows.
+        macro_rules! okta_federation_step {
+            ($step:expr, $session:ident) => {{
+                match $step {
+                    FederationStep::Prompt(request) => {
+                        return Ok((AuthResult::Next(request), AuthCacheAction::None));
+                    }
+                    FederationStep::Wait => {
+                        return Ok((
+                            AuthResult::Next(AuthRequest::MFAPollWait),
+                            AuthCacheAction::None,
+                        ));
+                    }
+                    FederationStep::Denied(msg) => {
+                        return Ok((AuthResult::Denied(msg), AuthCacheAction::None));
+                    }
+                    FederationStep::Token(token) => {
+                        let password: Option<String> = $session.password().map(str::to_string);
+                        let token = *token;
+                        let reauth_hello_pin: Option<Zeroizing<String>> = None;
+                        let token2 = enroll_and_obtain_enrolled_token!(token, password.clone());
+                        match self
+                            .token_validate(account_id, &token2, None, PrtCacheUpdate::Fresh)
+                            .await
+                        {
+                            Ok(AuthResult::Success { token: token3 }) => {
+                                let cache_action = match (
+                                    self.config.lock().await.get_offline_breakglass_enabled(),
+                                    password.as_ref(),
+                                ) {
+                                    (true, Some(cred)) => {
+                                        AuthCacheAction::PasswordHashUpdate { cred: cred.clone() }
+                                    }
+                                    _ => AuthCacheAction::None,
+                                };
+                                reseal_prt_with_existing_hello_key_on_success!(
+                                    &token2,
+                                    reauth_hello_pin,
+                                    token3,
+                                    cache_action
+                                );
+
+                                let hello_enabled = self.config.lock().await.get_enable_hello();
+                                if !hello_enabled || no_hello_pin {
+                                    info!("Skipping Hello enrollment because it is disabled");
+                                    return Ok((AuthResult::Success { token: token3 }, cache_action));
+                                }
+                                if self.fetch_hello_key(account_id, keystore).is_ok() {
+                                    debug!("Skipping Hello enrollment because Hello is already configured");
+                                    return Ok((AuthResult::Success { token: token3 }, cache_action));
+                                }
+
+                                *cred_handler = AuthCredHandler::SetupPin {
+                                    token: Box::new(Some(token)),
+                                };
+                                return Ok((
+                                    AuthResult::Next(AuthRequest::SetupPin {
+                                        msg: tr("Set up a PIN\nA Hello PIN is a fast, secure way to sign in to your device, apps, and services."),
+                                    }),
+                                    cache_action,
+                                ));
+                            }
+                            Ok(auth_result) => return Ok((auth_result, AuthCacheAction::None)),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                }
+            }};
+        }
+
         match (&mut *cred_handler, pam_next_req) {
+            (AuthCredHandler::OktaFederation(session), PamAuthRequest::Password { cred }) => {
+                let cred = Zeroizing::new(cred);
+                let step = session.start(&self.client, &cred).await;
+                okta_federation_step!(step, session)
+            }
+            (
+                AuthCredHandler::OktaFederation(session),
+                PamAuthRequest::MFAPoll { poll_attempt },
+            ) => {
+                let step = session.poll(&self.client, poll_attempt).await;
+                okta_federation_step!(step, session)
+            }
+            (AuthCredHandler::OktaFederation(session), PamAuthRequest::Input { cred }) => {
+                let cred = Zeroizing::new(cred);
+                let step = session.submit_code(&self.client, &cred).await;
+                okta_federation_step!(step, session)
+            }
             (AuthCredHandler::SetupPin { token }, PamAuthRequest::SetupPin { pin }) => {
                 let token = match token.as_ref().clone() {
                     Some(t) => t,
@@ -5404,6 +5516,55 @@ impl HimmelblauProvider {
             .unwrap_or("".to_string());
         tenant_id == "9188040d-6c67-4c5b-b112-36a304b66dad"
             || tenant_id == "9cd80435-793b-4f48-844b-6b3f37d1c1f3"
+    }
+
+    /// The Okta-federated sign-in for `account_id`, if enable_okta_federation
+    /// is set and the account's domain is federated to an identity provider
+    /// other than AD FS.
+    #[instrument(level = "debug", skip_all)]
+    async fn okta_federation_session(&self, account_id: &str) -> Option<OktaFederationSession> {
+        let (enabled, authority_host, mfa_method, timeout) = {
+            let cfg = self.config.lock().await;
+            (
+                cfg.get_enable_okta_federation(),
+                cfg.get_authority_host(&self.domain),
+                cfg.get_mfa_method(),
+                Duration::from_secs(cfg.get_request_timeout()),
+            )
+        };
+        if !enabled {
+            return None;
+        }
+        match federated_idp_url(&authority_host, account_id, timeout).await {
+            Ok(Some(idp_url)) => match OktaFederationSession::new(
+                &authority_host,
+                &idp_url,
+                account_id,
+                mfa_method.as_deref(),
+                timeout,
+            ) {
+                Ok(session) => {
+                    info!(
+                        "Using the federated identity provider {} for {}",
+                        idp_url.host_str().unwrap_or("unknown"),
+                        account_id
+                    );
+                    Some(session)
+                }
+                Err(e) => {
+                    error!("Okta federation is unavailable: {}", e);
+                    None
+                }
+            },
+            Ok(None) => None,
+            Err(e) => {
+                warn!(
+                    "Unable to determine the federation of {}: {}",
+                    account_id, e
+                );
+                None
+            }
+        }
     }
 
     #[instrument(level = "debug", skip_all)]
