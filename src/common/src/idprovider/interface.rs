@@ -100,6 +100,9 @@ pub struct UserToken {
 pub enum AuthCredHandler {
     /// Native IDX state is owned by this PAM session, never an Entra MFA flow.
     InteractionCode(Box<super::okta::NativeAuthSession>),
+    /// Entra ID sign-in of an account federated to Okta Identity Engine. The
+    /// session holds the Okta cookies and is owned by this PAM session.
+    OktaFederation(Box<super::okta_federation::OktaFederationSession>),
     /// Preserve the freshly authenticated OIDC identity through the local TOTP.
     OidcPinTotp {
         pin: Zeroizing<String>,
@@ -152,6 +155,7 @@ impl fmt::Debug for AuthCredHandler {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AuthCredHandler::InteractionCode(..) => f.write_str("InteractionCode { .. }"),
+            AuthCredHandler::OktaFederation(..) => f.write_str("OktaFederation { .. }"),
             AuthCredHandler::OidcPinTotp { .. } => f.write_str("OidcPinTotp { .. }"),
             AuthCredHandler::MFA { .. } => f.write_str("MFA { .. }"),
             AuthCredHandler::ReauthPassword { .. } => f.write_str("ReauthPassword { .. }"),

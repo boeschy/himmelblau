@@ -24,7 +24,7 @@ tracing = { workspace = true }
 configparser = "^3.0.2"
 libhimmelblau = { workspace = true }
 okta = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["cookies", "form"] }
 kanidm-hsm-crypto = { workspace = true }
 zeroize = { workspace = true }
 idmap = { workspace = true }

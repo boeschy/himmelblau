@@ -40,6 +40,7 @@ pub(crate) mod common;
 pub mod himmelblau;
 pub(crate) mod oidc_router;
 pub mod okta;
+pub mod okta_federation;
 pub mod openidconnect;
 
 pub mod interface;
